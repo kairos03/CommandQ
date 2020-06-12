@@ -94,13 +94,9 @@ def scheduler(ns):
 if __name__ == '__main__':
     args = get_args()
     address = (args.ip, int(args.port))
-    # logging = logging.getLogger('CQ')
-    # logging.setLevel(logging.DEBUG)
-    # fh = logging.FileHandler(args.log_file)
-    # fh.setFormatter(logging.Formatter('%(asctime)s %(name)s:%(levelname)s:%(message)s'))
-    # fh.setLevel(logging.DEBUG)
-    # logging.addHandler(fh)
-    logging.basicConfig(filename=args.log_file, format='%(asctime)s %(name)s:%(levelname)s:%(message)s', level=logging.DEBUG)
+    logging.basicConfig(filename=args.log_file,
+                        format='%(asctime)s %(name)s:%(levelname)s:%(message)s',
+                        level=logging.INFO)
 
     try:
         manager = Manager()
