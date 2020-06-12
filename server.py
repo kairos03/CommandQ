@@ -7,26 +7,14 @@ import traceback
 import logging
 
 
-address = ('localhost', 6000)
+def get_args():
+    parser = argparse.ArgumentParser('Command Queue Server')
+    parser.add_argument('ip', help='Server IP')
+    parser.add_argument('port', help='Server port')
+    return parser.parse_args()
 
 
-def show_queue(queue):
-    q = []
-    for _ in range(queue.qsize()):
-        item = queue.get()
-        queue.put(item)
-        q.append(item)
-    return q
-
-
-def del_queue(queue, index):
-    for i in range(queue.qsize()):
-        item = queue.get()
-        if i != index:
-            queue.put(item)
-
-
-def server(running, readyq, signal):
+def server(address, ns):
     # server listener
     with Listener(address, authkey=b'secret password') as listener:
         while True:
@@ -47,74 +35,67 @@ def server(running, readyq, signal):
                     
                     # ls
                     elif cmd == 'ls':
-                        run = show_queue(running)[0]
-                        ready = show_queue(readyq)
-
-                        print('curq: ', run)
-                        print('readyq', readyq)
-
-                        status = 'Running' if run[1] == None else 'Finish' if run[1] >= 0 else 'Killed'
-                        res = f'[0] {" ".join(run[0])} | {status}\n'
-                        for i, job in enumerate(reversed(ready)):
+                        status = 'Running' if ns.running[1] == None else 'Finish' if ns.running[1] >= 0 else 'Terminated'
+                        res = f'[0] {" ".join(ns.running[0])} | {status}\n'
+                        for i, job in enumerate(reversed(ns.readyq)):
                             res += f'[{i+1}] {" ".join(job)}\n'
                         conn.send(res)
                     
                     # add
                     elif cmd == 'add':
-                        readyq.put(args)
-                        conn.send(f'Job Added to {readyq.qsize()}.')
+                        ns.readyq.insert(0, args)
+                        conn.send(f'Job Added to {len(ns.readyq)}.')
                     
                     # del
                     elif req['cmd'] == 'del':
                         no = args
                         if no == 0:
-                            signal.put('kill')
+                            ns.signal='kill'
+                            conn.send(f'Running Job [0] killed.')
+                        elif no < len(ns.readyq):
+                            ns.readyq.pop(len(ns.readyq) - no)
+                            conn.send(f'Job [{no}] deleted.')
                         else:
-                            del_queue(readyq, no)
-                            conn.send(f'Job [{no}] deleted.')                
+                            conn.send('No such No of job.')
             except Exception:
                 traceback.print_exc()
 
 
-def scheduler(running, readyq, signal):
+def scheduler(ns):
     try:
         process = subprocess.Popen(args=['echo'])
-        running.put((['Empty'], 0))
+        ns.running = (['Empty'], 0)
         
         while True:
-            logging.debug("===================")
-            logging.debug(f'runner: {process} {process.poll()}')
-            logging.debug(f'{show_queue(readyq)} {show_queue(signal)}')
-            logging.debug("===================")
-            
-            if process.poll() == None and not signal.empty():
-                if signal.get() == 'kill':
-                    process.kill()
-                    logging.info('killed')
+            if process.poll() == None and ns.signal == 'kill':
+                process.kill()
+                ns.signal = None
 
-            if process.poll() != None:
-                logging.info('wait')
-                cmd = readyq.get()
-                logging.info('run')
+            if process.poll() != None and len(ns.readyq) > 0:
+                cmd = ns.readyq.pop()
                 process = subprocess.Popen(args=cmd)
             
             # update running process status
             ## may cause sync error
-            running.get()
-            running.put((process.args, process.poll()))
+            ns.running = (process.args, process.poll())
     finally:
         process.kill()
 
 
 if __name__ == '__main__':
+    args = get_args()
+    address = (args.ip, int(args.port))
     try:
-        running = Queue(1)
-        readyq = Queue()
-        signal = Queue()
+        manager = Manager()
+        ns = manager.Namespace()
+        ns.running = None
+        ns.readyq = manager.list()
+        ns.signal = None
+
         print('Server Started.')
-        serv = Process(target=scheduler, args=(running, readyq, signal), daemon=True)
+        serv = Process(target=scheduler, args=(ns,), daemon=True)
         serv.start()
-        server(running, readyq, signal)
+        server(address, ns)
         serv.join()
     finally:
         print('Server Stopped.')
